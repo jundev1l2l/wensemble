@@ -53,6 +53,7 @@ def main(args):
             plt.axis("off")
             plt.imshow(img.squeeze(), cmap="gray")
         plt.show()
+        plt.savefig(f"{args.mode}/{args.dataset}/examples.png")
         plt.close()
         logger.info("")
         logger.info("Val Dataset Config")
@@ -281,6 +282,7 @@ def get_dataset(dataset):
     NUM_CLASSES = {
         "mnist": 10,
         "emnist": 47,
+        "fmnist": 10,
     }
 
     if dataset == "mnist":
@@ -311,6 +313,19 @@ def get_dataset(dataset):
             transform=ToTensor(),
         )
 
+    elif dataset == "fmnist":
+        train_val_data = datasets.FashionMNIST(
+            root="/data/junhyun/",
+            train=True,
+            transform=ToTensor(),
+            download=True
+        )
+        test_data = datasets.FashionMNIST(
+            root="/data/junhyun/",
+            train=False,
+            transform=ToTensor(),
+        )
+
     splitter = StratifiedShuffleSplit(n_splits=1, test_size=10000, random_state=0)
     train_idx, val_idx =  list(splitter.split(train_val_data.data, train_val_data.targets))[0]
 
@@ -332,7 +347,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", "-s", type=int, default=0)
     parser.add_argument("--mode", "-m", choices=["train", "test", "ensemble", "wensemble"], default="train")
     parser.add_argument("--file", "-f", type=str, default=None)
-    parser.add_argument("--dataset", "-d", choices=["mnist", "emnist"], default="mnist")
+    parser.add_argument("--dataset", "-d", choices=["mnist", "emnist", "fmnist"], default="mnist")
     args = parser.parse_args()
     if args.mode == "ensemble":
         assert args.file is not None, ValueError("File path required for ensemble mode.")
