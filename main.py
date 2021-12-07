@@ -11,11 +11,20 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 from sklearn.model_selection import StratifiedShuffleSplit
 
+from model import INPUT_SIZE, CustomCNN, initialize_model
+
+
+NUM_CLASSES = {
+        "mnist": 10,
+        "emnist": 47,
+        "fmnist": 10,
+}
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -35,8 +44,9 @@ def main(args):
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    dataset = get_dataset(args.dataset)
     num_classes = NUM_CLASSES[args.dataset]
+    input_size = INPUT_SIZE[args.cnn]
+    dataset = get_dataset(args.dataset, input_size)
 
     if args.mode == "train":
         logger.info("Train Dataset Config")
@@ -70,7 +80,7 @@ def main(args):
 
     dataloader = get_dataloader(dataset)
 
-    model = CNN(num_classes)
+    model = CNN(args.cnn, num_classes)
     logger.info("Model Config")
     logger.info("-" * 30)
     logger.info(model)
@@ -82,6 +92,8 @@ def main(args):
     logger.info(loss_func)
     logger.info("")
 
+    rgb = (args.cnn != "custom")
+
     if args.mode == "train":
         optimizer = optim.Adam(model.parameters(), lr=1e-3)
         logger.info("Optimizer Config")
@@ -89,7 +101,7 @@ def main(args):
         logger.info(optimizer)
         logger.info("")
 
-        train(dataloader, model, loss_func, optimizer)
+        train(dataloader, model, loss_func, optimizer, rgb=rgb)
 
     elif args.mode == "test":
         model_dict = torch.load(f"/data/junhyun/ckpt/{args.dataset}/{args.exp}.tar", map_location="cpu")
@@ -99,6 +111,8 @@ def main(args):
         acc = 0
         num_batch_test = len(dataloader["test"])
         for x, y in dataloader["test"]:
+            if rgb:
+                x = x.repeat(1, 3, 1, 1)
             with torch.no_grad():
                 preds, logits = model.predict(x)
                 loss_batch = loss_func(logits, y)
@@ -111,7 +125,7 @@ def main(args):
 
     elif args.mode == "ensemble":
         model_list = []
-        with open(f"ensemble/{args.dataset}/{args.file}", "r") as f:
+        with open(f"ensemble/{args.file}", "r") as f:
             exp_list = yaml.safe_load(f)
         for exp in exp_list:
             model = CNN(num_classes).to("cuda")
@@ -123,6 +137,8 @@ def main(args):
         acc = 0
         num_batch_test = len(dataloader["test"])
         for x, y in dataloader["test"]:
+            if rgb:
+                x = x.repeat(1, 3, 1, 1)
             probs = torch.zeros((len(dataset["test"]), num_classes))
             for model in model_list:
                 with torch.no_grad():
@@ -138,7 +154,7 @@ def main(args):
     elif args.mode == "wensemble":
         model_list = []
         weight_list = []
-        with open(f"wensemble/{args.dataset}/{args.file}", "r") as f:
+        with open(f"wensemble/{args.file}", "r") as f:
             exp_list = yaml.safe_load(f)
         for exp in exp_list:
             model = CNN(num_classes).to("cuda")
@@ -148,6 +164,8 @@ def main(args):
             model_list.append(model)
             weight = torch.zeros(num_classes)
             for x, y in dataloader["val"]:
+                if rgb:
+                    x = x.repeat(1, 3, 1, 1)
                 preds, logits = model.predict(x.to("cuda"))
                 for c in range(num_classes):
                     idx = (preds==c).nonzero(as_tuple=True)[0]
@@ -160,6 +178,8 @@ def main(args):
         acc = 0
         num_batch_test = len(dataloader["test"])
         for x, y in dataloader["test"]:
+            if rgb:
+                x = x.repeat(1, 3, 1, 1)
             probs = torch.zeros((len(dataset["test"]), num_classes))
             for model, weight in list(zip(model_list, weight_list)):
                 with torch.no_grad():
@@ -173,22 +193,23 @@ def main(args):
         logger.info(f"Ensemble Size: {len(model_list)}, Ensemble_Acc: {acc.item():.4f}")
 
 
-
-def train(dataloader, model, loss_func, optimizer, num_epoch=100, print_epoch=1, eval_epoch=5):
+def train(dataloader, model, loss_func, optimizer, num_epoch=20, print_epoch=1, eval_epoch=1, rgb=False):
 
     logger.info("Train Started ...")
     logger.info("-" * 30)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
     num_batch_train = len(dataloader["train"])
     num_batch_val = len(dataloader["val"])
 
     best_acc = .0
     best_epoch = 0
     for epoch in range(num_epoch):
+        model = model.to(device)
         model.train()
         loss = 0
         for batch_idx, (x, y) in enumerate(tqdm(dataloader["train"])):
+            if rgb:
+                x = x.repeat(1, 3, 1, 1)
             logits = model(x.to(device))
             loss_batch = loss_func(logits, y.to(device))
             optimizer.zero_grad()
@@ -205,11 +226,14 @@ def train(dataloader, model, loss_func, optimizer, num_epoch=100, print_epoch=1,
             loss = 0
             acc = 0
             for x, y in dataloader["val"]:
+                if rgb:
+                    x = x.repeat(1, 3, 1, 1)
                 with torch.no_grad():
-                    preds, logits = model.predict(x.to(device))
-                    loss_batch = loss_func(logits, y.to(device))
+                    model = model.cpu()
+                    preds, logits = model.predict(x)
+                    loss_batch = loss_func(logits, y)
                     loss += loss_batch
-                    acc_batch = (preds.cpu()==y).sum() / len(y)
+                    acc_batch = (preds==y).sum() / len(y)
                     acc += acc_batch
             loss /= num_batch_val
             acc /= num_batch_val
@@ -229,29 +253,19 @@ def train(dataloader, model, loss_func, optimizer, num_epoch=100, print_epoch=1,
 
 class CNN(nn.Module):
 
-    def __init__(self, num_classes):
+    def __init__(self, model_type, num_classes):
         super(CNN, self).__init__()
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=16, kernel_size=5, stride=1, padding=2),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2)
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=5, stride=1, padding=2),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2)
-        )
-        self.out = nn.Linear(in_features=32 * 7 * 7, out_features=num_classes)
+        if model_type == "custom":
+            model = CustomCNN(num_classes)
+        else:
+            model, input_size = initialize_model(model_type, num_classes, feature_extract=True, use_pretrained=True)
+        self.cnn = model
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = x.view(x.size(0), -1)
-        output = self.out(x)
-        return output
+        return self.cnn(x)
 
     def predict(self, x):
-        logits = self.forward(x)
+        logits = self(x)
         preds = logits.argmax(-1)
         return preds, logits
 
@@ -259,7 +273,7 @@ class CNN(nn.Module):
 def get_dataloader(dataset):
 
     train_loader = DataLoader(dataset["train"],
-                              batch_size=100,
+                              batch_size=50,
                               shuffle=True,
                               num_workers=1)
 
@@ -276,26 +290,36 @@ def get_dataloader(dataset):
     return {"train": train_loader, "val": val_loader, "test": test_loader}
 
 
-def get_dataset(dataset):
+def get_dataset(dataset, input_size):
 
-    global NUM_CLASSES
-    NUM_CLASSES = {
-        "mnist": 10,
-        "emnist": 47,
-        "fmnist": 10,
+    data_transforms = {
+        'train': transforms.Compose([
+            # transforms.RandomResizedCrop(input_size),
+            # transforms.RandomHorizontalFlip(),
+            transforms.Resize(input_size),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485], [0.229])
+        ]),
+        # 'val': transforms.Compose([
+        #     # transforms.Resize(input_size),
+        #     # transforms.CenterCrop(input_size),
+        #     transforms.ToTensor(),
+        #     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        # ]),
     }
-
     if dataset == "mnist":
         train_val_data = datasets.MNIST(
             root="/data/junhyun/",
             train=True,
-            transform=ToTensor(),
-            download=True
+            # transform=ToTensor(),
+            download=True,
+            transform=data_transforms["train"]
         )
         test_data = datasets.MNIST(
             root="/data/junhyun/",
             train=False,
-            transform=ToTensor(),
+            # transform=ToTensor(),
+            transform=data_transforms["train"]
         )
 
     elif dataset == "emnist":
@@ -303,27 +327,31 @@ def get_dataset(dataset):
             split="balanced",
             root="/data/junhyun/",
             train=True,
-            transform=ToTensor(),
-            download=True
+            # transform=ToTensor(),
+            download=True,
+            transform=data_transforms["train"]
         )
         test_data = datasets.EMNIST(
             split="balanced",
             root="/data/junhyun/",
             train=False,
-            transform=ToTensor(),
+            # transform=ToTensor(),
+            transform=data_transforms["train"]
         )
 
     elif dataset == "fmnist":
         train_val_data = datasets.FashionMNIST(
             root="/data/junhyun/",
             train=True,
-            transform=ToTensor(),
-            download=True
+            # transform=ToTensor(),
+            download=True,
+            transform=data_transforms["train"]
         )
         test_data = datasets.FashionMNIST(
             root="/data/junhyun/",
             train=False,
-            transform=ToTensor(),
+            # transform=ToTensor(),
+            transform=data_transforms["train"]
         )
 
     splitter = StratifiedShuffleSplit(n_splits=1, test_size=10000, random_state=0)
@@ -348,6 +376,7 @@ if __name__ == "__main__":
     parser.add_argument("--mode", "-m", choices=["train", "test", "ensemble", "wensemble"], default="train")
     parser.add_argument("--file", "-f", type=str, default=None)
     parser.add_argument("--dataset", "-d", choices=["mnist", "emnist", "fmnist"], default="mnist")
+    parser.add_argument("--cnn", "-c", choices=["custom", "resnet", "alexnet", "vgg", "squeezenet", "densenet", "inception"], default="custom")
     args = parser.parse_args()
     if args.mode == "ensemble":
         assert args.file is not None, ValueError("File path required for ensemble mode.")
