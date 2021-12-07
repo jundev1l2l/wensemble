@@ -36,6 +36,7 @@ def main(args):
     logger.addHandler(file_handler)
 
     dataset = get_dataset(args.dataset)
+    num_classes = NUM_CLASSES[args.dataset]
 
     if args.mode == "train":
         logger.info("Train Dataset Config")
@@ -68,7 +69,7 @@ def main(args):
 
     dataloader = get_dataloader(dataset)
 
-    model = CNN(NUM_CLASSES[args.dataset])
+    model = CNN(num_classes)
     logger.info("Model Config")
     logger.info("-" * 30)
     logger.info(model)
@@ -109,10 +110,10 @@ def main(args):
 
     elif args.mode == "ensemble":
         model_list = []
-        with open(args.file, "r") as f:
+        with open(f"ensemble/{args.dataset}/{args.file}", "r") as f:
             exp_list = yaml.safe_load(f)
         for exp in exp_list:
-            model = CNN().to("cuda")
+            model = CNN(num_classes).to("cuda")
             model_dict = torch.load(f"/data/junhyun/ckpt/{args.dataset}/{exp}.tar")
             model.load_state_dict(model_dict)
             model.eval()
@@ -121,7 +122,7 @@ def main(args):
         acc = 0
         num_batch_test = len(dataloader["test"])
         for x, y in dataloader["test"]:
-            probs = torch.zeros((len(dataset["test"]), 10))
+            probs = torch.zeros((len(dataset["test"]), num_classes))
             for model in model_list:
                 with torch.no_grad():
                     _, logits = model.predict(x.to("cuda"))
@@ -136,18 +137,18 @@ def main(args):
     elif args.mode == "wensemble":
         model_list = []
         weight_list = []
-        with open(args.file, "r") as f:
+        with open(f"wensemble/{args.dataset}/{args.file}", "r") as f:
             exp_list = yaml.safe_load(f)
         for exp in exp_list:
-            model = CNN().to("cuda")
+            model = CNN(num_classes).to("cuda")
             model_dict = torch.load(f"/data/junhyun/ckpt/{args.dataset}/{exp}.tar")
             model.load_state_dict(model_dict)
             model.eval()
             model_list.append(model)
-            weight = torch.zeros(10)
+            weight = torch.zeros(num_classes)
             for x, y in dataloader["val"]:
                 preds, logits = model.predict(x.to("cuda"))
-                for c in range(10):
+                for c in range(num_classes):
                     idx = (preds==c).nonzero(as_tuple=True)[0]
                     num_correct = (y[idx] == c).sum().item()
                     acc = num_correct / len(idx)
@@ -158,7 +159,7 @@ def main(args):
         acc = 0
         num_batch_test = len(dataloader["test"])
         for x, y in dataloader["test"]:
-            probs = torch.zeros((len(dataset["test"]), 10))
+            probs = torch.zeros((len(dataset["test"]), num_classes))
             for model, weight in list(zip(model_list, weight_list)):
                 with torch.no_grad():
                     preds, logits = model.predict(x.to("cuda"))
@@ -262,12 +263,12 @@ def get_dataloader(dataset):
                               num_workers=1)
 
     val_loader = DataLoader(dataset["val"],
-                              batch_size=10000,
-                              shuffle=True,
-                              num_workers=1)
+                            batch_size=dataset["val"].data.shape[0],
+                            shuffle=True,
+                            num_workers=1)
 
     test_loader = DataLoader(dataset["test"],
-                             batch_size=10000,
+                             batch_size=dataset["test"].data.shape[0],
                              shuffle=True,
                              num_workers=1)
 
