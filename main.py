@@ -128,7 +128,7 @@ def main(args):
         with open(f"ensemble/{args.file}", "r") as f:
             exp_list = yaml.safe_load(f)
         for exp in exp_list:
-            model = CNN(num_classes).to("cuda")
+            model = CNN(args.cnn, num_classes).to("cuda")
             model_dict = torch.load(f"/data/junhyun/ckpt/{args.dataset}/{exp}.tar")
             model.load_state_dict(model_dict)
             model.eval()
@@ -157,7 +157,7 @@ def main(args):
         with open(f"wensemble/{args.file}", "r") as f:
             exp_list = yaml.safe_load(f)
         for exp in exp_list:
-            model = CNN(num_classes).to("cuda")
+            model = CNN(args.cnn, num_classes).to("cuda")
             model_dict = torch.load(f"/data/junhyun/ckpt/{args.dataset}/{exp}.tar")
             model.load_state_dict(model_dict)
             model.eval()
