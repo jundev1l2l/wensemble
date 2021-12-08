@@ -125,8 +125,9 @@ def main(args):
 
     elif args.mode == "ensemble":
         model_list = []
-        with open(f"ensemble/{args.file}", "r") as f:
-            exp_list = yaml.safe_load(f)
+        # with open(f"ensemble/{args.file}", "r") as f:
+        #     exp_list = yaml.safe_load(f)
+        exp_list = [f"{args.cnn}_{i}" for i in range(args.start, args.end + 1)  if (i not in [39,40])]
         for exp in exp_list:
             model = CNN(args.cnn, num_classes).to("cuda")
             model_dict = torch.load(f"/data/junhyun/ckpt/{args.dataset}/{exp}.tar")
@@ -154,8 +155,9 @@ def main(args):
     elif args.mode == "wensemble":
         model_list = []
         weight_list = []
-        with open(f"wensemble/{args.file}", "r") as f:
-            exp_list = yaml.safe_load(f)
+        # with open(f"wensemble/{args.file}", "r") as f:
+        #     exp_list = yaml.safe_load(f)
+        exp_list = [f"{args.cnn}_{i}" for i in range(args.start, args.end + 1) if (i not in [39,40])]
         for exp in exp_list:
             model = CNN(args.cnn, num_classes).to("cuda")
             model_dict = torch.load(f"/data/junhyun/ckpt/{args.dataset}/{exp}.tar")
@@ -373,12 +375,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp", "-e", type=str, default="debug")
     parser.add_argument("--seed", "-s", type=int, default=0)
+    parser.add_argument("--start", type=int, default=1)
+    parser.add_argument("--end", type=int, default=1)
     parser.add_argument("--mode", "-m", choices=["train", "test", "ensemble", "wensemble"], default="train")
-    parser.add_argument("--file", "-f", type=str, default=None)
+    # parser.add_argument("--file", "-f", type=str, default=None)
     parser.add_argument("--dataset", "-d", choices=["mnist", "emnist", "fmnist"], default="mnist")
     parser.add_argument("--cnn", "-c", choices=["custom", "resnet", "alexnet", "vgg", "squeezenet", "densenet", "inception"], default="custom")
     args = parser.parse_args()
-    if args.mode == "ensemble":
-        assert args.file is not None, ValueError("File path required for ensemble mode.")
+    # if args.mode == "ensemble":
+    #     assert args.file is not None, ValueError("File path required for ensemble mode.")
 
     main(args)
